@@ -7,21 +7,6 @@ parser.add_argument('exe', help='ELF executable to decompile')
 
 args = parser.parse_args()
 
-EI_MAG0 = 0
-EI_MAG1 = 1
-EI_MAG2 = 2
-EI_MAG3 = 3
-EI_CLASS = 4
-EI_DATA = 5
-EI_VERSION = 6
-EI_OSABI = 7
-EI_ABIVERSION = 8
-EI_PAD = 9
-E_TYPE = 16
-E_MACHINE = 18
-E_VERSION = 20
-E_ENTRY = 24
-
 class Field(object):
     def __init__(self, offset, size):
         self._offset = offset
@@ -148,10 +133,10 @@ class Elf(object):
 
     @property
     def bit_width(self):
-        if ord(bytes[EI_CLASS]) == 1:
+        if self._get_unsigned_integer(self._fields.bit_width) == 1:
             return 32
-        elif ord(bytes[EI_CLASS]) == 2:
-            return 64 
+
+        return 64 
 
     @property
     def endianness(self):
