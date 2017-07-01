@@ -3,7 +3,7 @@ import struct
 import sys
 
 parser = argparse.ArgumentParser(description='Decompile ELF executable')
-parser.add_argument('--exe', help='ELF executable to decompile')
+parser.add_argument('exe', help='ELF executable to decompile')
 
 args = parser.parse_args()
 
@@ -20,6 +20,7 @@ EI_PAD = 9
 E_TYPE = 16
 E_MACHINE = 18
 E_VERSION = 20
+E_ENTRY = 24
 
 class Elf(object):
     """
@@ -30,24 +31,24 @@ class Elf(object):
 
     @property
     def magic_number(self):
-        return bytes[EI_MAG0]
+        return ord(bytes[EI_MAG0])
 
     @property
     def magic_elf(self):
-        return chr(bytes[EI_MAG1]) + chr(bytes[EI_MAG2]) + chr(bytes[EI_MAG3])
+        return bytes[EI_MAG1] + bytes[EI_MAG2] + bytes[EI_MAG3]
 
     @property
     def bit_width(self):
-        if bytes[EI_CLASS] == 1:
+        if ord(bytes[EI_CLASS]) == 1:
             return 32
-        elif bytes[EI_CLASS] == 2:
+        elif ord(bytes[EI_CLASS]) == 2:
             return 64 
 
     @property
     def endianness(self):
-        if bytes[EI_DATA] == 1:
+        if ord(bytes[EI_DATA]) == 1:
             return 'little'
-        elif bytes[EI_DATA] == 2:
+        elif ord(bytes[EI_DATA]) == 2:
             return 'big'
 
     @property
@@ -60,11 +61,11 @@ class Elf(object):
 
     @property
     def version(self):
-        return bytes[EI_VERSION]
+        return ord(bytes[EI_VERSION])
 
     @property
     def os_abi(self):
-        abi = bytes[EI_OSABI]
+        abi = ord(bytes[EI_OSABI])
         if abi == 0:
             return 'System V'
         elif abi == 1:
@@ -106,7 +107,7 @@ class Elf(object):
 
     @property
     def abi_version(self):
-        return bytes[EI_ABIVERSION]
+        return ord(bytes[EI_ABIVERSION])
 
     @property
     def padding(self):
@@ -117,8 +118,7 @@ class Elf(object):
 
     @property
     def type(self):
-        object_type = bytes[E_TYPE+self._byte_offset(2)]
-
+        object_type = self._get_two_byte_unsigned_integer(E_TYPE)
         if object_type == 1:
             return 'Relocatable'
         elif object_type == 2:
@@ -132,7 +132,7 @@ class Elf(object):
 
     @property
     def machine(self):
-        mach = bytes[E_MACHINE+self._byte_offset(2)]
+        mach = self._get_two_byte_unsigned_integer(E_MACHINE)
         if mach == 0x00:
             return 'None specified'
         elif mach == 0x02:
@@ -157,15 +157,54 @@ class Elf(object):
             return 'RISC-V'
 
     @property
-    def version(self):
-        return bytes[E_VERSION+self._byte_offset(4)] 
+    def version2(self):
+        return self._get_four_byte_unsigned_integer(E_VERSION)
 
-    def _byte_offset(self, byte_count):
-        byte_offset = 0
+    @property
+    def entry_point(self):
+        if self.bit_width == 32:
+            return self._get_four_byte_unsigned_integer(E_ENTRY)
+        else:
+            return self._get_eight_byte_unsigned_integer(E_ENTRY)
+
+    @property
+    def program_headers_offset(self):
+        if self.bit_width == 32:
+            return self._get_four_byte_unsigned_integer(E_ENTRY+4)
+        else:
+            return self._get_eight_byte_unsigned_integer(E_ENTRY+8)
+
+    @property
+    def section_headers_offset(self):
+        if self.bit_width == 32:
+            return self._get_four_byte_unsigned_integer(E_ENTRY+8)
+        else:
+            return self._get_eight_byte_unsigned_integer(E_ENTRY+16)
+
+    @property
+    def flags(self):
+        if self.bit_width == 32:
+            start_index = E_ENTRY+12
+        else:
+            start_index = E_ENTRY=24
+
+        return self._get_four_byte_unsigned_integer(start_index)
+
+    def _get_two_byte_unsigned_integer(self, start_index):
+        return self._get_integer(start_index, 'H')
+
+    def _get_four_byte_unsigned_integer(self, start_index):
+        return self._get_integer(start_index, 'I')
+
+    def _get_eight_byte_unsigned_integer(self, start_index):
+        return self._get_integer(start_index, 'Q')
+
+    def _get_integer(self, start_index, byte_count_indicator):
+        direction = '<'
         if self.is_bigendian:
-            byte_offset = byte_count-1
+            direction = '>'
 
-        return byte_offset
+        return struct.unpack_from(direction + byte_count_indicator, self.bytes, start_index)[0]
 
 
 exe = args.exe
@@ -173,15 +212,14 @@ if not exe:
     print('You must specify an ELF file to examine using the --exe command line argument')
     sys.exit(1)
 
-bytes = []
+bytes = ''
 with open(exe, 'rb') as f:
     while True:
         byte_char = f.read(1)
         if byte_char == '':
             break
 
-        byte = ord(byte_char)
-        bytes.append(byte)
+        bytes += byte_char
 
 
 elf = Elf(bytes)
@@ -193,4 +231,8 @@ print('OS ABI:\t\t\t' + elf.os_abi)
 print('ABI version:\t\t' + str(elf.abi_version))
 print('Type:\t\t\t' + elf.type)
 print('Instruction set:\t' + elf.machine)
-print('ELF version:\t\t' + str(elf.version))
+print('Version (2):\t\t' + str(elf.version2))
+print('Entry point:\t\t' + '0x' + format(elf.entry_point, '02X'))
+print('Program headers start:\t' + str(elf.program_headers_offset) + ' (bytes into the file)')
+print('Section headers start:\t' + str(elf.section_headers_offset) + ' (bytes into the file)')
+print('Flags:\t\t\t' + str(elf.flags))
