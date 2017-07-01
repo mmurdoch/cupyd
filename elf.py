@@ -22,20 +22,129 @@ E_MACHINE = 18
 E_VERSION = 20
 E_ENTRY = 24
 
+class Field(object):
+    def __init__(self, offset, size):
+        self._offset = offset
+        self._size = size
+
+    @property
+    def offset(self):
+        return self._offset
+
+    @property
+    def size(self):
+        return self._size
+
+
+class Fields(object):
+    @property
+    def magic_number(self):
+        return Field(0, 1)
+
+    @property
+    def magic_elf(self):
+        return Field(1, 3)
+
+    @property
+    def bit_width(self):
+        return Field(4, 1)
+
+    @property
+    def endianness(self):
+        return Field(5, 1)
+
+    @property
+    def version(self):
+        return Field(6, 1)
+
+    @property
+    def os_abi(self):
+        return Field(7, 1)
+
+    @property
+    def abi_version(self):
+        return Field(8, 1)
+
+    @property
+    def padding(self):
+        return Field(9, 7)
+
+    @property
+    def type(self):
+        return Field(16, 2)
+
+    @property
+    def machine(self):
+        return Field(18, 2)
+
+    @property
+    def version2(self):
+        return Field(20, 4)
+
+
+class ThirtyTwoBitFields(Fields):
+    @property
+    def entry_point(self):
+        return Field(24, 4)
+
+    @property
+    def program_headers_offset(self):
+        return Field(28, 4)
+
+    @property
+    def section_headers_offset(self):
+        return Field(32, 4)
+
+    @property
+    def flags(self):
+        return Field(36, 4)
+
+    @property
+    def header_size(self):
+        return Field(40, 2)
+
+
+class SixtyFourBitFields(Fields):
+    @property
+    def entry_point(self):
+        return Field(24, 8)
+
+    @property
+    def program_headers_offset(self):
+        return Field(32, 8)
+
+    @property
+    def section_headers_offset(self):
+        return Field(40, 8)
+
+    @property
+    def flags(self):
+        return Field(48, 4)
+
+    @property
+    def header_size(self):
+        return Field(52, 2)
+
+
 class Elf(object):
     """
     See https://en.wikipedia.org/wiki/Executable_and_Linkable_Format
     """
     def __init__(self, bytes):
         self.bytes = bytes
+        self._fields = Fields()
+        if self.bit_width == 32:
+            self._fields = ThirtyTwoBitFields()
+        else:
+            self._fields = SixtyFourBitFields()
 
     @property
     def magic_number(self):
-        return ord(bytes[EI_MAG0])
+        return self._get_unsigned_integer(self._fields.magic_number)
 
     @property
     def magic_elf(self):
-        return bytes[EI_MAG1] + bytes[EI_MAG2] + bytes[EI_MAG3]
+        return self._get_string(self._fields.magic_elf)
 
     @property
     def bit_width(self):
@@ -46,10 +155,10 @@ class Elf(object):
 
     @property
     def endianness(self):
-        if ord(bytes[EI_DATA]) == 1:
+        if self._get_unsigned_integer(self._fields.endianness) == 1:
             return 'little'
-        elif ord(bytes[EI_DATA]) == 2:
-            return 'big'
+
+        return 'big'
 
     @property
     def is_littleendian(self):
@@ -61,11 +170,11 @@ class Elf(object):
 
     @property
     def version(self):
-        return ord(bytes[EI_VERSION])
+        return self._get_unsigned_integer(self._fields.version)
 
     @property
     def os_abi(self):
-        abi = ord(bytes[EI_OSABI])
+        abi = self._get_unsigned_integer(self._fields.os_abi)
         if abi == 0:
             return 'System V'
         elif abi == 1:
@@ -107,18 +216,18 @@ class Elf(object):
 
     @property
     def abi_version(self):
-        return ord(bytes[EI_ABIVERSION])
+        return self._get_unsigned_integer(self._fields.abi_version)
 
     @property
     def padding(self):
         """
         Currently unused.
         """
-        return bytes[EI_PAD:EI_PAD+7]
+        return self._get_string(self._fields.padding)
 
     @property
     def type(self):
-        object_type = self._get_two_byte_unsigned_integer(E_TYPE)
+        object_type = self._get_unsigned_integer(self._fields.type)
         if object_type == 1:
             return 'Relocatable'
         elif object_type == 2:
@@ -132,7 +241,7 @@ class Elf(object):
 
     @property
     def machine(self):
-        mach = self._get_two_byte_unsigned_integer(E_MACHINE)
+        mach = self._get_unsigned_integer(self._fields.machine)
         if mach == 0x00:
             return 'None specified'
         elif mach == 0x02:
@@ -158,59 +267,60 @@ class Elf(object):
 
     @property
     def version2(self):
-        return self._get_four_byte_unsigned_integer(E_VERSION)
+        return self._get_unsigned_integer(self._fields.version2)
 
     @property
     def entry_point(self):
-        if self.bit_width == 32:
-            return self._get_four_byte_unsigned_integer(E_ENTRY)
-        else:
-            return self._get_eight_byte_unsigned_integer(E_ENTRY)
+        return self._get_unsigned_integer(self._fields.entry_point)
 
     @property
     def program_headers_offset(self):
-        if self.bit_width == 32:
-            return self._get_four_byte_unsigned_integer(E_ENTRY+4)
-        else:
-            return self._get_eight_byte_unsigned_integer(E_ENTRY+8)
+        return self._get_unsigned_integer(self._fields.program_headers_offset)
 
     @property
     def section_headers_offset(self):
-        if self.bit_width == 32:
-            return self._get_four_byte_unsigned_integer(E_ENTRY+8)
-        else:
-            return self._get_eight_byte_unsigned_integer(E_ENTRY+16)
+        return self._get_unsigned_integer(self._fields.section_headers_offset)
 
     @property
     def flags(self):
-        if self.bit_width == 32:
-            start_index = E_ENTRY+12
-        else:
-            start_index = E_ENTRY=24
+        return self._get_unsigned_integer(self._fields.flags)
 
-        return self._get_four_byte_unsigned_integer(start_index)
+    @property
+    def header_size(self):
+        return self._get_unsigned_integer(self._fields.header_size)
+
+    def _get_unsigned_integer(self, field):
+        byte_count_indicators = {
+            1: 'B', 2: 'H', 4: 'I', 8: 'Q'
+        }
+
+        return self._get_bytes(
+            field.offset, byte_count_indicators[field.size])
+
+    def _get_string(self, field):
+        return self._get_bytes(field.offset, str(field.size) + 's')
+
+    def _get_one_byte_unsigned_integer(self, start_index):
+        return self._get_bytes(start_index, 'B')
 
     def _get_two_byte_unsigned_integer(self, start_index):
-        return self._get_integer(start_index, 'H')
+        return self._get_bytes(start_index, 'H')
 
     def _get_four_byte_unsigned_integer(self, start_index):
-        return self._get_integer(start_index, 'I')
+        return self._get_bytes(start_index, 'I')
 
     def _get_eight_byte_unsigned_integer(self, start_index):
-        return self._get_integer(start_index, 'Q')
+        return self._get_bytes(start_index, 'Q')
 
-    def _get_integer(self, start_index, byte_count_indicator):
+    def _get_bytes(self, start_index, byte_count_indicator):
         direction = '<'
-        if self.is_bigendian:
+        if byte_count_indicator != 'B' and self.is_bigendian:
             direction = '>'
 
         return struct.unpack_from(direction + byte_count_indicator, self.bytes, start_index)[0]
 
 
 exe = args.exe
-if not exe:
-    print('You must specify an ELF file to examine using the --exe command line argument')
-    sys.exit(1)
 
 bytes = ''
 with open(exe, 'rb') as f:
@@ -236,3 +346,4 @@ print('Entry point:\t\t' + '0x' + format(elf.entry_point, '02X'))
 print('Program headers start:\t' + str(elf.program_headers_offset) + ' (bytes into the file)')
 print('Section headers start:\t' + str(elf.section_headers_offset) + ' (bytes into the file)')
 print('Flags:\t\t\t' + str(elf.flags))
+print('Size of this header:\t' + str(elf.header_size) + ' (bytes)')
