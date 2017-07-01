@@ -1,4 +1,5 @@
 import argparse
+import inspect
 import struct
 import sys
 
@@ -125,22 +126,22 @@ class Elf(object):
 
     @property
     def magic_number(self):
-        return self._get_unsigned_integer(self._fields.magic_number)
+        return self._get_field()
 
     @property
     def magic_elf(self):
-        return self._get_string(self._fields.magic_elf)
+        return self._get_field()
 
     @property
     def bit_width(self):
-        if self._get_unsigned_integer(self._fields.bit_width) == 1:
+        if self._get_field() == 1:
             return 32
 
         return 64 
 
     @property
     def endianness(self):
-        if self._get_unsigned_integer(self._fields.endianness) == 1:
+        if self._get_field() == 1:
             return 'little'
 
         return 'big'
@@ -155,11 +156,11 @@ class Elf(object):
 
     @property
     def version(self):
-        return self._get_unsigned_integer(self._fields.version)
+        return self._get_field()
 
     @property
     def os_abi(self):
-        abi = self._get_unsigned_integer(self._fields.os_abi)
+        abi = self._get_field()
         if abi == 0:
             return 'System V'
         elif abi == 1:
@@ -201,18 +202,18 @@ class Elf(object):
 
     @property
     def abi_version(self):
-        return self._get_unsigned_integer(self._fields.abi_version)
+        return self._get_field()
 
     @property
     def padding(self):
         """
         Currently unused.
         """
-        return self._get_string(self._fields.padding)
+        return self._get_field()
 
     @property
     def type(self):
-        object_type = self._get_unsigned_integer(self._fields.type)
+        object_type = self._get_field()
         if object_type == 1:
             return 'Relocatable'
         elif object_type == 2:
@@ -226,7 +227,7 @@ class Elf(object):
 
     @property
     def machine(self):
-        mach = self._get_unsigned_integer(self._fields.machine)
+        mach = self._get_field()
         if mach == 0x00:
             return 'None specified'
         elif mach == 0x02:
@@ -252,27 +253,35 @@ class Elf(object):
 
     @property
     def version2(self):
-        return self._get_unsigned_integer(self._fields.version2)
+        return self._get_field()
 
     @property
     def entry_point(self):
-        return self._get_unsigned_integer(self._fields.entry_point)
+        return self._get_field()
 
     @property
     def program_headers_offset(self):
-        return self._get_unsigned_integer(self._fields.program_headers_offset)
+        return self._get_field()
 
     @property
     def section_headers_offset(self):
-        return self._get_unsigned_integer(self._fields.section_headers_offset)
+        return self._get_field()
 
     @property
     def flags(self):
-        return self._get_unsigned_integer(self._fields.flags)
+        return self._get_field()
 
     @property
     def header_size(self):
-        return self._get_unsigned_integer(self._fields.header_size)
+        return self._get_field()
+
+    def _get_field(self):
+        calling_method_name = inspect.stack()[1][3]
+        field = getattr(self._fields, calling_method_name)
+        if field.size == 1 or field.size % 2 == 0:
+            return self._get_unsigned_integer(field)
+
+        return self._get_string(field)
 
     def _get_unsigned_integer(self, field):
         byte_count_indicators = {
@@ -284,18 +293,6 @@ class Elf(object):
 
     def _get_string(self, field):
         return self._get_bytes(field.offset, str(field.size) + 's')
-
-    def _get_one_byte_unsigned_integer(self, start_index):
-        return self._get_bytes(start_index, 'B')
-
-    def _get_two_byte_unsigned_integer(self, start_index):
-        return self._get_bytes(start_index, 'H')
-
-    def _get_four_byte_unsigned_integer(self, start_index):
-        return self._get_bytes(start_index, 'I')
-
-    def _get_eight_byte_unsigned_integer(self, start_index):
-        return self._get_bytes(start_index, 'Q')
 
     def _get_bytes(self, start_index, byte_count_indicator):
         direction = '<'
