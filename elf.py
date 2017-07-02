@@ -1,7 +1,6 @@
 import argparse
 import inspect
 import struct
-import sys
 
 parser = argparse.ArgumentParser(description='Decompile ELF executable')
 parser.add_argument('exe', help='ELF executable to decompile')
@@ -380,6 +379,99 @@ class StringTable(object):
         return strings
 
 
+class SymbolTableFields(object):
+    @property
+    def name_string_offset(self):
+        return Field(0, 4)
+
+
+class ThirtyTwoBitSymbolTableFields(SymbolTableFields):
+    @property
+    def value(self):
+        return Field(4, 4)
+
+    @property
+    def info(self):
+        return Field(12, 1)
+
+    @property
+    def total_size(self):
+        return 16
+
+
+class SixtyFourBitSymbolTableFields(SymbolTableFields):
+    @property
+    def value(self):
+        return Field(8, 8)
+
+    @property
+    def info(self):
+        return Field(4, 1)
+
+    @property
+    def total_size(self):
+        return 24
+
+
+class Symbol(object):
+    def __init__(self, fields, bytes, elf):
+        self._fields = fields
+        self._bytes = bytes
+        self._elf = elf
+
+    @property
+    def name_string_offset(self):
+        return self._get_field()
+
+    @property
+    def name(self):
+        return elf.string_table.string_at(self.name_string_offset)
+
+    @property
+    def value(self):
+        return self._get_field()
+
+    @property
+    def info(self):
+        return self._get_field()
+
+    @property
+    def type(self):
+        t = self.info & 15
+        if t == 0:
+            return 'NOTYPE'
+        elif t == 1:
+            return 'OBJECT'
+        elif t == 2:
+            return 'FUNC'
+        elif t == 3:
+            return 'SECTION'
+        elif t == 4:
+            return 'FILE'
+        else:
+            return 'Unknown'
+
+    def _get_field(self):
+        return _get_field(self._fields, self._bytes, self._elf)
+
+
+class SymbolTable(object):
+    def __init__(self, fields, bytes, elf):
+        self._fields = fields
+        self._bytes = bytes
+        self._elf = elf 
+
+    @property
+    def entries(self):
+        symbols = []
+
+        for i in range(0, len(self._bytes), self._fields.total_size):
+            bytes = self._bytes[i:i+self._fields.total_size]
+            symbols.append(Symbol(self._fields, bytes, self._elf))
+
+        return symbols
+
+
 class Elf(object):
     """
     See https://en.wikipedia.org/wiki/Executable_and_Linkable_Format
@@ -390,9 +482,11 @@ class Elf(object):
         if self.bit_width == 32:
             self._file_header_fields = ThirtyTwoBitFileHeaderFields()
             self._section_header_fields = ThirtyTwoBitSectionHeaderFields()
+            self._symbol_table_fields = ThirtyTwoBitSymbolTableFields()
         else:
             self._file_header_fields = SixtyFourBitFileHeaderFields()
             self._section_header_fields = SixtyFourBitSectionHeaderFields()
+            self._symbol_table_fields = SixtyFourBitSymbolTableFields()
 
     @property
     def magic_number(self):
@@ -574,9 +668,9 @@ class Elf(object):
             section_headers = []
 
             for i in range(self.section_header_entry_count):
-                header_start = self.section_headers_offset + i*self.section_header_entry_size
-                header_end = header_start + self.section_header_entry_size
-                bytes = self._bytes[header_start:header_end]
+                start = self.section_headers_offset + i*self.section_header_entry_size
+                end = start + self.section_header_entry_size
+                bytes = self._bytes[start:end]
                 fields = self._section_header_fields
                 section_headers.append(SectionHeader(fields, bytes, self)) 
             self._section_headers = section_headers
@@ -590,7 +684,8 @@ class Elf(object):
 
             start = header.offset
             end = start + header.size
-            self._section_header_names = StringTable(bytes[start:end])
+            bytes = self._bytes[start:end]
+            self._section_header_names = StringTable(bytes)
         return self._section_header_names
 
     @property
@@ -601,9 +696,24 @@ class Elf(object):
                 if header.name == '.strtab':
                     start = header.offset
                     end = start + header.size
-                    self._string_table = StringTable(bytes[start:end])
+                    bytes = self._bytes[start:end]
+                    self._string_table = StringTable(bytes)
                     break
         return self._string_table
+
+    @property
+    def symbol_table(self):
+        if not hasattr(self, '_symbol_table'):
+            self._symbol_table = None
+            for header in self.section_headers:
+                if header.name == '.symtab':
+                    start = header.offset
+                    end = start + header.size
+                    bytes = self._bytes[start:end]
+                    fields = self._symbol_table_fields
+                    self._symbol_table = SymbolTable(fields, bytes, self)
+                    break
+        return self._symbol_table
 
 
 exe = args.exe
@@ -654,6 +764,11 @@ print('Name\t\t\tType\t\tOffset\tSize\tVirtual Address')
 for header in elf.section_headers:
     print_section_header(header, elf.section_header_names)
 
-print('\nStrings')
+print('\nString Table')
 for string in elf.string_table.entries:
     print(string)
+
+print('\nSymbol Table')
+print('Value\t\t\tType\t\tName')
+for symbol in elf.symbol_table.entries:
+    print(format(symbol.value, '016X') + '\t' + symbol.type + '\t\t' + symbol.name)
