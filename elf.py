@@ -395,6 +395,10 @@ class ThirtyTwoBitSymbolTableFields(SymbolTableFields):
         return Field(12, 1)
 
     @property
+    def section_table_index(self):
+        return Field(14, 2)
+
+    @property
     def total_size(self):
         return 16
 
@@ -407,6 +411,10 @@ class SixtyFourBitSymbolTableFields(SymbolTableFields):
     @property
     def info(self):
         return Field(4, 1)
+
+    @property
+    def section_table_index(self):
+        return Field(6, 2)
 
     @property
     def total_size(self):
@@ -450,6 +458,22 @@ class Symbol(object):
             return 'FILE'
         else:
             return 'Unknown'
+
+    @property
+    def section_table_index(self):
+        return self._get_field()
+
+    @property
+    def section_name(self):
+        index = self.section_table_index
+        if index == 0:
+            return 'UNDEF'
+        elif index == 65521:
+            return 'ABS'
+        elif index == 65522:
+            return 'COMMON'
+        else:
+            return self._elf.section_headers[index].name
 
     def _get_field(self):
         return _get_field(self._fields, self._bytes, self._elf)
@@ -757,18 +781,15 @@ def pad_to(string, width):
 
     return string
 
-def print_section_header(header, section_header_names):
-    print(pad_to(header.name, 20) + '\t' + pad_to(str(header.type), 10) + '\t' + str(header.offset) + '\t' + str(header.size) + '\t0x' + format(header.address, '08X'))
-
 print('Name\t\t\tType\t\tOffset\tSize\tVirtual Address')
 for header in elf.section_headers:
-    print_section_header(header, elf.section_header_names)
+    print(pad_to(header.name, 20) + '\t' + pad_to(str(header.type), 10) + '\t' + str(header.offset) + '\t' + str(header.size) + '\t0x' + format(header.address, '08X'))
 
 print('\nString Table')
 for string in elf.string_table.entries:
     print(string)
 
 print('\nSymbol Table')
-print('Value\t\t\tType\t\tName')
+print('Value\t\t\tType\tSection\t\t\tName')
 for symbol in elf.symbol_table.entries:
-    print(format(symbol.value, '016X') + '\t' + symbol.type + '\t\t' + symbol.name)
+    print(format(symbol.value, '016X') + '\t' + symbol.type + '\t' + pad_to(symbol.section_name, 20) +'\t' + symbol.name)
