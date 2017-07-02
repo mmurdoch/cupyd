@@ -89,6 +89,26 @@ class ThirtyTwoBitFields(Fields):
     def header_size(self):
         return Field(40, 2)
 
+    @property
+    def program_header_entry_size(self):
+        return Field(42, 2)
+
+    @property
+    def program_header_entry_count(self):
+        return Field(44, 2)
+
+    @property
+    def section_header_entry_size(self):
+        return Field(46, 2)
+
+    @property
+    def section_header_entry_count(self):
+        return Field(48, 2)
+
+    @property
+    def section_header_name_index(self):
+        return Field(50, 2)
+
 
 class SixtyFourBitFields(Fields):
     @property
@@ -110,6 +130,26 @@ class SixtyFourBitFields(Fields):
     @property
     def header_size(self):
         return Field(52, 2)
+
+    @property
+    def program_header_entry_size(self):
+        return Field(54, 2)
+
+    @property
+    def program_header_entry_count(self):
+        return Field(56, 2)
+
+    @property
+    def section_header_entry_size(self):
+        return Field(58, 2)
+
+    @property
+    def section_header_entry_count(self):
+        return Field(60, 2)
+
+    @property
+    def section_header_name_index(self):
+        return Field(62, 2)
 
 
 class Elf(object):
@@ -275,6 +315,26 @@ class Elf(object):
     def header_size(self):
         return self._get_field()
 
+    @property
+    def program_header_entry_size(self):
+        return self._get_field()
+
+    @property
+    def program_header_entry_count(self):
+        return self._get_field()
+
+    @property
+    def section_header_entry_size(self):
+        return self._get_field()
+
+    @property
+    def section_header_entry_count(self):
+        return self._get_field()
+
+    @property
+    def section_header_name_index(self):
+        return self._get_field()
+
     def _get_field(self):
         calling_method_name = inspect.stack()[1][3]
         field = getattr(self._fields, calling_method_name)
@@ -299,7 +359,8 @@ class Elf(object):
         if byte_count_indicator != 'B' and self.is_bigendian:
             direction = '>'
 
-        return struct.unpack_from(direction + byte_count_indicator, self.bytes, start_index)[0]
+        return struct.unpack_from(direction + byte_count_indicator,
+            self.bytes, start_index)[0]
 
 
 exe = args.exe
@@ -315,17 +376,22 @@ with open(exe, 'rb') as f:
 
 
 elf = Elf(bytes)
-print('Magic number:\t\t' + '0x' + format(elf.magic_number, '02X') + ' \'' + elf.magic_elf + '\'')
-print('Bit width:\t\t' + str(elf.bit_width))
-print('Endianness:\t\t' + elf.endianness)
-print('Version:\t\t' + str(elf.version))
-print('OS ABI:\t\t\t' + elf.os_abi)
-print('ABI version:\t\t' + str(elf.abi_version))
-print('Type:\t\t\t' + elf.type)
-print('Instruction set:\t' + elf.machine)
-print('Version (2):\t\t' + str(elf.version2))
-print('Entry point:\t\t' + '0x' + format(elf.entry_point, '02X'))
-print('Program headers start:\t' + str(elf.program_headers_offset) + ' (bytes into the file)')
-print('Section headers start:\t' + str(elf.section_headers_offset) + ' (bytes into the file)')
-print('Flags:\t\t\t' + str(elf.flags))
-print('Size of this header:\t' + str(elf.header_size) + ' (bytes)')
+print('Magic number:\t\t\t\t' + '0x' + format(elf.magic_number, '02X') + ' \'' + elf.magic_elf + '\'')
+print('Bit width:\t\t\t\t' + str(elf.bit_width))
+print('Endianness:\t\t\t\t' + elf.endianness)
+print('Version:\t\t\t\t' + str(elf.version))
+print('OS ABI:\t\t\t\t\t' + elf.os_abi)
+print('ABI version:\t\t\t\t' + str(elf.abi_version))
+print('Type:\t\t\t\t\t' + elf.type)
+print('Instruction set:\t\t\t' + elf.machine)
+print('Version (2):\t\t\t\t' + str(elf.version2))
+print('Entry point:\t\t\t\t' + '0x' + format(elf.entry_point, '02X'))
+print('Program headers start:\t\t\t' + str(elf.program_headers_offset) + ' (bytes into the file)')
+print('Section headers start:\t\t\t' + str(elf.section_headers_offset) + ' (bytes into the file)')
+print('Flags:\t\t\t\t\t' + str(elf.flags))
+print('Size of this header:\t\t\t' + str(elf.header_size) + ' (bytes)')
+print('Size of a program (segment) header:\t' + str(elf.program_header_entry_size) + ' (bytes)')
+print('Number of program (segment) headers:\t' + str(elf.program_header_entry_count))
+print('Size of a section header:\t\t' + str(elf.section_header_entry_size) + ' (bytes)')
+print('Number of section headers:\t\t' + str(elf.section_header_entry_count))
+print('Index of section header names\t\t' + str(elf.section_header_name_index))
