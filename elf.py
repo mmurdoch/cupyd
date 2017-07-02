@@ -8,29 +8,29 @@ parser.add_argument('exe', help='ELF executable to decompile')
 
 args = parser.parse_args()
 
-def _get_field(fields, bytes, endianness):
+def _get_field(fields, bytes, elf):
     calling_method_name = inspect.stack()[2][3]
     field = getattr(fields, calling_method_name)
     if field.size == 1 or field.size % 2 == 0:
-        return _get_unsigned_integer(field, bytes, endianness)
+        return _get_unsigned_integer(field, bytes, elf)
 
-    return _get_string(field, bytes, endianness)
+    return _get_string(field, bytes, elf)
 
-def _get_unsigned_integer(field, bytes, endianness):
+def _get_unsigned_integer(field, bytes, elf):
     byte_count_indicators = {
         1: 'B', 2: 'H', 4: 'I', 8: 'Q'
     }
 
     return _get_bytes(field.offset,
-        byte_count_indicators[field.size], bytes, endianness)
+        byte_count_indicators[field.size], bytes, elf)
 
-def _get_string(field, bytes, is_bigendian):
+def _get_string(field, bytes, elf):
     return _get_bytes(field.offset,
-        str(field.size) + 's', bytes, is_bigendian)
+        str(field.size) + 's', bytes, elf)
 
-def _get_bytes(start_index, byte_count_indicator, bytes, endianness):
+def _get_bytes(start_index, byte_count_indicator, bytes, elf):
     direction = '<'
-    if byte_count_indicator != 'B' and endianness.is_bigendian:
+    if byte_count_indicator != 'B' and elf.is_bigendian:
         direction = '>'
 
     return struct.unpack_from(direction + byte_count_indicator,
@@ -135,7 +135,7 @@ class ThirtyTwoBitFileHeaderFields(FileHeaderFields):
         return Field(48, 2)
 
     @property
-    def section_header_name_index(self):
+    def section_header_name_section_index(self):
         return Field(50, 2)
 
 
@@ -177,7 +177,7 @@ class SixtyFourBitFileHeaderFields(FileHeaderFields):
         return Field(60, 2)
 
     @property
-    def section_header_name_index(self):
+    def section_header_name_section_index(self):
         return Field(62, 2)
 
 
@@ -260,14 +260,18 @@ class SixtyFourBitSectionHeaderFields(SectionHeaderFields):
 
 
 class SectionHeader(object):
-    def __init__(self, fields, bytes, endianness):
+    def __init__(self, fields, bytes, elf):
         self._fields = fields
         self._bytes = bytes
-        self._endianness = endianness
+        self._elf = elf
 
     @property
     def name_string_offset(self):
         return self._get_field()
+
+    @property
+    def name(self):
+        return elf.section_header_names.string_at(self.name_string_offset)
 
     @property
     def type(self):
@@ -344,7 +348,36 @@ class SectionHeader(object):
         return self._get_field()
 
     def _get_field(self):
-        return _get_field(self._fields, self._bytes, self._endianness)
+        return _get_field(self._fields, self._bytes, self._elf)
+
+
+class StringTable(object):
+    def __init__(self, bytes):
+        self._bytes = bytes
+
+    def string_at(self, offset):
+        string = ''
+
+        current_index = offset
+        while ord(self._bytes[current_index]) != 0:
+            string += self._bytes[current_index]
+            current_index += 1
+
+        return string
+
+    @property
+    def entries(self):
+        strings = []
+
+        string = ''
+        for byte in self._bytes:
+            if ord(byte) == 0:
+                strings.append(string)
+                string = ''
+            else:
+                string += byte
+ 
+        return strings
 
 
 class Elf(object):
@@ -529,7 +562,7 @@ class Elf(object):
         return self._get_file_header_field()
 
     @property
-    def section_header_name_index(self):
+    def section_header_name_section_index(self):
         return self._get_file_header_field()
 
     def _get_file_header_field(self):
@@ -537,16 +570,40 @@ class Elf(object):
 
     @property
     def section_headers(self):
-        section_headers = []
+        if not hasattr(self, '_section_headers'):
+            section_headers = []
 
-        for i in range(self.section_header_entry_count):
-            header_start = self.section_headers_offset + i*self.section_header_entry_size
-            header_end = header_start + self.section_header_entry_size
-            bytes = self._bytes[header_start:header_end]
-            fields = self._section_header_fields
-            section_headers.append(SectionHeader(fields, bytes, self)) 
+            for i in range(self.section_header_entry_count):
+                header_start = self.section_headers_offset + i*self.section_header_entry_size
+                header_end = header_start + self.section_header_entry_size
+                bytes = self._bytes[header_start:header_end]
+                fields = self._section_header_fields
+                section_headers.append(SectionHeader(fields, bytes, self)) 
+            self._section_headers = section_headers
 
-        return section_headers
+        return self._section_headers
+
+    @property
+    def section_header_names(self):
+        if not hasattr(self, '_section_header_names'):
+            header = elf.section_headers[elf.section_header_name_section_index]
+
+            start = header.offset
+            end = start + header.size
+            self._section_header_names = StringTable(bytes[start:end])
+        return self._section_header_names
+
+    @property
+    def string_table(self):
+        if not hasattr(self, '_string_table'):
+            self._string_table = None
+            for header in self.section_headers:
+                if header.name == '.strtab':
+                    start = header.offset
+                    end = start + header.size
+                    self._string_table = StringTable(bytes[start:end])
+                    break
+        return self._string_table
 
 
 exe = args.exe
@@ -580,7 +637,7 @@ print('Size of a program (segment) header:\t' + str(elf.program_header_entry_siz
 print('Number of program (segment) headers:\t' + str(elf.program_header_entry_count))
 print('Size of a section header:\t\t' + str(elf.section_header_entry_size) + ' (bytes)')
 print('Number of section headers:\t\t' + str(elf.section_header_entry_count))
-print('Index of section header names\t\t' + str(elf.section_header_name_index))
+print('Index of section names section header:\t' + str(elf.section_header_name_section_index))
 
 print('\nSections')
 
@@ -590,25 +647,13 @@ def pad_to(string, width):
 
     return string
 
-def read_string(string_table, start_index):
-    string = ''
+def print_section_header(header, section_header_names):
+    print(pad_to(header.name, 20) + '\t' + pad_to(str(header.type), 10) + '\t' + str(header.offset) + '\t' + str(header.size) + '\t0x' + format(header.address, '08X'))
 
-    current_index = start_index
-    while ord(string_table[current_index]) != 0:
-        string += string_table[current_index]
-        current_index += 1
-
-    return string
-
-def print_section_header(header, string_table):
-    print(pad_to(read_string(string_table, header.name_string_offset), 20) + '\t' + pad_to(str(header.type), 10) + '\t0x' + format(header.address, '08X') + '\t' + str(header.offset) + '\t' + str(header.size))
-
-string_table_header = elf.section_headers[elf.section_header_name_index]
-
-string_table_start = string_table_header.offset
-string_table_end = string_table_start+string_table_header.size
-string_table = bytes[string_table_start:string_table_end]
-
-print('Name\t\t\tType\t\tVirt Addr\tOffset\tSize')
+print('Name\t\t\tType\t\tOffset\tSize\tVirtual Address')
 for header in elf.section_headers:
-    print_section_header(header, string_table)
+    print_section_header(header, elf.section_header_names)
+
+print('\nStrings')
+for string in elf.string_table.entries:
+    print(string)
