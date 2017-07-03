@@ -180,6 +180,140 @@ class SixtyFourBitFileHeaderFields(FileHeaderFields):
         return Field(62, 2)
 
 
+class ProgramHeaderFields(object):
+    @property
+    def type(self):
+        return Field(0, 4)
+
+
+class ThirtyTwoBitProgramHeaderFields(ProgramHeaderFields):
+    @property
+    def offset(self):
+        return Field(4, 4)
+
+    @property
+    def virtual_address(self):
+        return Field(8, 4)
+
+    @property
+    def physical_address(self):
+        return Field(12, 4)
+
+    @property
+    def size_in_file(self):
+        return Field(16, 4)
+
+    @property
+    def size_in_memory(self):
+        return Field(20, 4)
+
+    @property
+    def flags(self):
+        return Field(24, 4)
+
+    @property
+    def alignment(self):
+        return Field(28, 4)
+
+
+class SixtyFourBitProgramHeaderFields(ProgramHeaderFields):
+    @property
+    def flags(self):
+        return Field(4, 4)
+
+    @property
+    def offset(self):
+        return Field(8, 8)
+
+    @property
+    def virtual_address(self):
+        return Field(16, 8)
+
+    @property
+    def physical_address(self):
+        return Field(24, 8)
+
+    @property
+    def size_in_file(self):
+        return Field(32, 8)
+
+    @property
+    def size_in_memory(self):
+        return Field(40, 8)
+
+    @property
+    def alignment(self):
+        return Field(48, 8)
+
+
+class ProgramHeader(object):
+    def __init__(self, fields, bytes, elf):
+        self._fields = fields
+        self._bytes = bytes
+        self._elf = elf
+
+    @property
+    def type(self):
+        segment_type = self._get_field()
+        if segment_type == 0:
+            return 'NULL'
+        elif segment_type == 1:
+            return 'LOAD'
+        elif segment_type == 2:
+            return 'DYNAMIC'
+        elif segment_type == 3:
+            return 'INTERP'
+        elif segment_type == 4:
+            return 'NOTE'
+        elif segment_type == 5:
+            return 'SHLIB'
+        elif segment_type == 6:
+            return 'PHDR'
+        else:
+            return 'Unknown'
+
+    @property
+    def flags(self):
+        flags = []
+
+        raw_flags = self._get_field()
+        if raw_flags & 4:
+            flags.append('R')
+        if raw_flags & 2:
+            flags.append('W')
+        if raw_flags & 1:
+            flags.append('X')
+
+        return flags
+
+    @property
+    def offset(self):
+        return self._get_field()
+
+    @property
+    def virtual_address(self):
+        return self._get_field()
+
+    @property
+    def physical_address(self):
+        return self._get_field()
+
+    @property
+    def size_in_file(self):
+        return self._get_field()
+
+    @property
+    def size_in_memory(self):
+        return self._get_field()
+
+    @property
+    def alignment(self):
+        return self._get_field()
+    
+    def _get_field(self):
+        return _get_field(self._fields, self._bytes, self._elf)
+
+
 class SectionHeaderFields(object):
     @property
     def name_string_offset(self):
@@ -399,6 +533,10 @@ class ThirtyTwoBitSymbolTableFields(SymbolTableFields):
         return Field(14, 2)
 
     @property
+    def size(self):
+        return Field(8, 4)
+
+    @property
     def total_size(self):
         return 16
 
@@ -415,6 +553,10 @@ class SixtyFourBitSymbolTableFields(SymbolTableFields):
     @property
     def section_table_index(self):
         return Field(6, 2)
+
+    @property
+    def size(self):
+        return Field(16, 8)
 
     @property
     def total_size(self):
@@ -475,6 +617,10 @@ class Symbol(object):
         else:
             return self._elf.section_headers[index].name
 
+    @property
+    def size(self):
+        return self._get_field()
+
     def _get_field(self):
         return _get_field(self._fields, self._bytes, self._elf)
 
@@ -505,10 +651,12 @@ class Elf(object):
         self._file_header_fields = FileHeaderFields()
         if self.bit_width == 32:
             self._file_header_fields = ThirtyTwoBitFileHeaderFields()
+            self._program_header_fields = ThirtyTwoBitProgramHeaderFields()
             self._section_header_fields = ThirtyTwoBitSectionHeaderFields()
             self._symbol_table_fields = ThirtyTwoBitSymbolTableFields()
         else:
             self._file_header_fields = SixtyFourBitFileHeaderFields()
+            self._program_header_fields = SixtyFourBitProgramHeaderFields()
             self._section_header_fields = SixtyFourBitSectionHeaderFields()
             self._symbol_table_fields = SixtyFourBitSymbolTableFields()
 
@@ -687,6 +835,26 @@ class Elf(object):
         return _get_field(self._file_header_fields, self._bytes, self)
 
     @property
+    def segment_headers(self):
+        return self.program_headers
+
+    @property
+    def program_headers(self):
+        if not hasattr(self, '_program_headers'):
+            program_headers = []
+
+            for i in range(self.program_header_entry_count):
+                start = self.program_headers_offset + i*self.program_header_entry_size
+                end = start + self.program_header_entry_size
+                bytes = self._bytes[start:end]
+                fields = self._program_header_fields
+                program_headers.append(ProgramHeader(fields, bytes, self))
+            self._program_headers = program_headers
+
+        return self._program_headers
+
+
+    @property
     def section_headers(self):
         if not hasattr(self, '_section_headers'):
             section_headers = []
@@ -739,6 +907,12 @@ class Elf(object):
                     break
         return self._symbol_table
 
+def pad_to(string, width):
+    while len(string) < width:
+        string += ' '
+
+    return string
+
 
 exe = args.exe
 
@@ -751,7 +925,6 @@ with open(exe, 'rb') as f:
 
         bytes += byte_char
 
-
 elf = Elf(bytes)
 print('Magic number:\t\t\t\t' + '0x' + format(elf.magic_number, '02X') + ' \'' + elf.magic_elf + '\'')
 print('Bit width:\t\t\t\t' + str(elf.bit_width))
@@ -763,7 +936,7 @@ print('Type:\t\t\t\t\t' + elf.type)
 print('Instruction set:\t\t\t' + elf.machine)
 print('Version (2):\t\t\t\t' + str(elf.version2))
 print('Entry point:\t\t\t\t' + '0x' + format(elf.entry_point, '02X'))
-print('Program headers start:\t\t\t' + str(elf.program_headers_offset) + ' (bytes into the file)')
+print('Program (segment) headers start:\t\t' + str(elf.program_headers_offset) + ' (bytes into the file)')
 print('Section headers start:\t\t\t' + str(elf.section_headers_offset) + ' (bytes into the file)')
 print('Flags:\t\t\t\t\t' + str(elf.flags))
 print('Size of this header:\t\t\t' + str(elf.header_size) + ' (bytes)')
@@ -773,23 +946,30 @@ print('Size of a section header:\t\t' + str(elf.section_header_entry_size) + ' (
 print('Number of section headers:\t\t' + str(elf.section_header_entry_count))
 print('Index of section names section header:\t' + str(elf.section_header_name_section_index))
 
+print('\nSegments')
+print('Type\tOffset\t\tVirtual Address\t\tPhysical Address\tFile Size\tMemory Size\tFlags\tAlignment')
+for header in elf.segment_headers:
+    flags = ' '.join(header.flags)
+    print(header.type + '\t0x' + format(header.offset, '06X') + '\t0x' + format(header.virtual_address, '016X') + '\t0x' + format(header.physical_address, '016X') + '\t0x' + format(header.size_in_file, '06X') + '\t0x' + format(header.size_in_memory, '06X') + '\t' + flags + '\t0x' + format(header.alignment, '01X'))
+
 print('\nSections')
-
-def pad_to(string, width):
-    while len(string) < width:
-        string += ' '
-
-    return string
-
 print('Name\t\t\tType\t\tOffset\tSize\tVirtual Address')
 for header in elf.section_headers:
     print(pad_to(header.name, 20) + '\t' + pad_to(str(header.type), 10) + '\t' + str(header.offset) + '\t' + str(header.size) + '\t0x' + format(header.address, '08X'))
 
-print('\nString Table')
-for string in elf.string_table.entries:
-    print(string)
-
 print('\nSymbol Table')
-print('Value\t\t\tType\tSection\t\t\tName')
+print('Value\t\t\tSize\tType\tSection\t\t\tName')
 for symbol in elf.symbol_table.entries:
-    print(format(symbol.value, '016X') + '\t' + symbol.type + '\t' + pad_to(symbol.section_name, 20) +'\t' + symbol.name)
+    print(format(symbol.value, '016X') + '\t' + str(symbol.size) + '\t' + symbol.type + '\t' + pad_to(symbol.section_name, 20) +'\t' + symbol.name)
+
+for symbol in elf.symbol_table.entries:
+    if symbol.name == 'main':
+        section = elf.section_headers[symbol.section_table_index]
+        start = section.offset + symbol.value - section.address
+        end = start + symbol.size
+        b = bytes[start:end]
+        import binascii
+        print(binascii.hexlify(b))
+
+# Get list of functions (name, address, bytes)
+# Get bytes for a function
